@@ -120,7 +120,7 @@ func LoadAccount(cl *http.Client) error {
 							URL(getLink(n)).
 							ToFile("test.pdf").
 							CopyHeaders(m).
-							Transport(requests.Record(nil, "")).
+							//Transport(requests.Record(nil, "")).
 							Client(cl).
 							Fetch(context.Background())
 						if err != nil {
