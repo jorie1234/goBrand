@@ -2,50 +2,104 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
+	"flag"
 	"fmt"
-	"golang.org/x/net/html"
-	"golang.org/x/net/html/atom"
 	"log"
 	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
+	"regexp"
 	"runtime"
 	"strings"
 	"time"
 
+	"golang.org/x/net/html"
+	"golang.org/x/net/html/atom"
+
 	"github.com/carlmjohnson/requests"
 	"github.com/joho/godotenv"
+
+	"gopkg.in/gomail.v2"
 )
 
 func main() {
 	godotenv.Load()
-	login := os.Getenv("LOGIN")
-	pwd := os.Getenv("PWD")
+	login := os.Getenv("BRAND_LOGIN")
+	pwd := os.Getenv("BRAND_PWD")
+
+	//read flag if send email
+	var sendemail bool
+	flag.BoolVar(&sendemail, "sendemail", false, "send email")
+	flag.Parse()
 
 	if len(login) == 0 || len(pwd) == 0 {
-		fmt.Println("No login or pwd")
+		log.Println("No login or pwd")
 		return
 	}
-	LoadLogin(login, pwd)
-}
-
-func LoadLogin(login, pwd string) error {
+	log.Printf("Login %s Password %s", login, pwd)
 	cl := *http.DefaultClient
 	cl.Timeout = 30 * time.Second
 	cl.Jar = requests.NewCookieJar()
 
 	u := "https://kiosk.brandeins.de/users/sign_in"
+
+	token, err := LoadLoginForm(u, &cl, login, pwd)
+	if err != nil {
+		log.Println(err)
+		return
+	}
+	err = DoLogin(u, &cl, token, login, pwd)
+	if err != nil {
+		log.Println(err)
+		return
+	}
+	file, err := DownloadPDF(&cl)
+	if err != nil {
+		log.Println(err)
+		return
+	}
+	log.Println("downloaded file " + file)
+
+	if sendemail {
+		SendMail(file)
+	}
+}
+
+func SendMail(file string) {
+	//send email
+	msg := gomail.NewMessage()
+
+	msg.SetHeader("From", "jonas.riedel@vier.ai")
+	msg.SetHeader("To", "jonas.riedel@vier.ai")
+	msg.SetHeader("Subject", "Brand Magazine")
+
+	body := fmt.Sprintf("Hier das brand eins Magazin %s", file)
+	msg.SetBody("text/html", body)
+	msg.Attach(file)
+
+	mailer := gomail.NewDialer("mail1.a.vg-fra-a.4com.de", 25, "", "")
+	mailer.TLSConfig = &tls.Config{InsecureSkipVerify: true}
+	//mailer := gomail.NewDialer("smtp.gmail.com", 587,  "jonasriedel70@gmail.com", "paypvcayeqjcweeu")
+
+	if err := mailer.DialAndSend(msg); err != nil {
+		panic(err)
+	}
+	//}
+}
+func LoadLoginForm(u string, cl *http.Client, login, pwd string) (string, error) {
+
 	var doc html.Node
 	err := requests.
 		URL(u).
-		Client(&cl).
+		Client(cl).
 		Handle(requests.ToHTML(&doc)).
 		//Transport(requests.Record(nil, "")).
 		Fetch(context.Background())
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	// find the form action url
@@ -56,7 +110,7 @@ func LoadLogin(login, pwd string) error {
 		if n.DataAtom == atom.Form {
 			for _, attr := range n.Attr {
 				if attr.Key == "action" {
-					fmt.Println(attr.Val)
+					//fmt.Println(attr.Val)
 				}
 			}
 		}
@@ -66,7 +120,7 @@ func LoadLogin(login, pwd string) error {
 					found = true
 				}
 				if attr.Key == "value" && found {
-					fmt.Println("Token " + attr.Val)
+					log.Println("Token " + attr.Val)
 					token = attr.Val
 					found = false
 				}
@@ -79,19 +133,13 @@ func LoadLogin(login, pwd string) error {
 	}
 	f(&doc)
 	if len(token) == 0 {
-		fmt.Println("Token not found")
-		return errors.New("No Token found")
+		return "", errors.New("No Token found")
 	}
-	err = DoLogin(u, &cl, token, login, pwd)
-	if err != nil {
-		return err
-	}
-	LoadAccount(&cl)
-	return nil
+	return token, nil
 
 }
 
-func LoadAccount(cl *http.Client) error {
+func DownloadPDF(cl *http.Client) (string, error) {
 
 	u := "https://kiosk.brandeins.de/account/show"
 	var doc html.Node
@@ -102,9 +150,10 @@ func LoadAccount(cl *http.Client) error {
 		//Transport(requests.Record(nil, "")).
 		Fetch(context.Background())
 	if err != nil {
-		return err
+		return "", err
 	}
 
+	pdffilename := ""
 	// find the form action url
 	var f func(*html.Node)
 	f = func(n *html.Node) {
@@ -114,7 +163,17 @@ func LoadAccount(cl *http.Client) error {
 					//find pdf in string
 					t := collectText(n)
 					if strings.Contains(t, "pdf") {
-						fmt.Println("PDF found " + getLink(n))
+						r, _ := regexp.Compile(".*pdf")
+						res := r.FindStringSubmatch(t)
+						if len(res) > 0 {
+							pdffilename = res[0]
+						}
+						//check if file exists
+						if _, err := os.Stat(pdffilename); !os.IsNotExist(err) {
+							log.Println("file already exists " + pdffilename)
+							return
+						}
+						log.Println("PDF found " + pdffilename + "  " + getLink(n))
 						m := make(map[string][]string)
 						err := requests.
 							URL(getLink(n)).
@@ -124,13 +183,14 @@ func LoadAccount(cl *http.Client) error {
 							Client(cl).
 							Fetch(context.Background())
 						if err != nil {
-							fmt.Println(err)
+							log.Println(err)
 						}
 						if t, ok := m["Content-Disposition"]; ok {
 							tt := strings.Split(t[0], "\"")
 							if len(tt) > 1 {
-								fmt.Println("filename " + tt[1])
-								os.Rename("test.pdf", tt[1])
+								pdffilename = tt[1]
+								//fmt.Println("filename " + pdffilename)
+								os.Rename("test.pdf", pdffilename)
 							}
 						}
 					}
@@ -143,7 +203,7 @@ func LoadAccount(cl *http.Client) error {
 		}
 	}
 	f(&doc)
-	return nil
+	return pdffilename, nil
 }
 
 func DoLogin(u string, cl *http.Client, token, login, pwd string) error {
@@ -159,7 +219,7 @@ func DoLogin(u string, cl *http.Client, token, login, pwd string) error {
 		Client(cl).
 		BodyForm(d).
 		ContentType("application/x-www-form-urlencoded").
-		//Transport(requests.Record(nil, "")).
+		Transport(requests.Record(nil, "")).
 		CheckStatus(http.StatusFound).
 		Fetch(context.Background())
 	if err != nil {
