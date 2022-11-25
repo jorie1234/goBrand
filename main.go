@@ -29,6 +29,7 @@ func main() {
 	godotenv.Load()
 	login := os.Getenv("BRAND_LOGIN")
 	pwd := os.Getenv("BRAND_PWD")
+	email_server := os.Getenv("BRAND_EMAIL_SERVER")
 
 	//read flag if send email
 	var sendemail bool
@@ -64,11 +65,11 @@ func main() {
 	log.Println("downloaded file " + file)
 
 	if sendemail {
-		SendMail(file)
+		SendMail(email_server, file)
 	}
 }
 
-func SendMail(file string) {
+func SendMail(email_server, file string) {
 	//send email
 	msg := gomail.NewMessage()
 
@@ -80,14 +81,13 @@ func SendMail(file string) {
 	msg.SetBody("text/html", body)
 	msg.Attach(file)
 
-	mailer := gomail.NewDialer("mail1.a.vg-fra-a.4com.de", 25, "", "")
+	mailer := gomail.NewDialer(email_server, 25, "", "")
 	mailer.TLSConfig = &tls.Config{InsecureSkipVerify: true}
-	//mailer := gomail.NewDialer("smtp.gmail.com", 587,  "jonasriedel70@gmail.com", "paypvcayeqjcweeu")
 
 	if err := mailer.DialAndSend(msg); err != nil {
 		panic(err)
 	}
-	//}
+
 }
 func LoadLoginForm(u string, cl *http.Client, login, pwd string) (string, error) {
 
