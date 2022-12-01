@@ -73,7 +73,7 @@ func SendMail(email_server, file string) {
 	//send email
 	msg := gomail.NewMessage()
 
-	msg.SetHeader("From", "jonas.riedel@vier.ai")
+	msg.SetHeader("From", "jonas.riedel@4com.de")
 	msg.SetHeader("To", "jonas.riedel@vier.ai")
 	msg.SetHeader("Subject", "Brand Magazine")
 
@@ -165,15 +165,17 @@ func DownloadPDF(cl *http.Client) (string, error) {
 					if strings.Contains(t, "pdf") {
 						r, _ := regexp.Compile(".*pdf")
 						res := r.FindStringSubmatch(t)
+						var pdffiletmp string
 						if len(res) > 0 {
-							pdffilename = res[0]
+							pdffiletmp = res[0]
 						}
+						log.Println("PDF found " + pdffiletmp + "  " + getLink(n))
 						//check if file exists
-						if _, err := os.Stat(pdffilename); !os.IsNotExist(err) {
-							log.Println("file already exists " + pdffilename)
+						if _, err := os.Stat(pdffiletmp); !os.IsNotExist(err) {
+							log.Println("file already exists " + pdffiletmp)
 							return
 						}
-						log.Println("PDF found " + pdffilename + "  " + getLink(n))
+						pdffilename = pdffiletmp
 						m := make(map[string][]string)
 						err := requests.
 							URL(getLink(n)).
