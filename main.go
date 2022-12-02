@@ -30,10 +30,13 @@ func main() {
 	login := os.Getenv("BRAND_LOGIN")
 	pwd := os.Getenv("BRAND_PWD")
 	email_server := os.Getenv("BRAND_EMAIL_SERVER")
+	email_sender := os.Getenv("BRAND_EMAIL_SENDER")
 
 	//read flag if send email
 	var sendemail bool
+	var email_rcp_list string
 	flag.BoolVar(&sendemail, "sendemail", false, "send email")
+	flag.StringVar(&email_rcp_list, "emails", "", "List of email recipients, separated by comma")
 	flag.Parse()
 
 	if len(login) == 0 || len(pwd) == 0 {
@@ -64,28 +67,33 @@ func main() {
 	}
 	log.Println("downloaded file " + file)
 
-	if sendemail {
-		SendMail(email_server, file)
+	if file != "" {
+		if sendemail {
+			SendMail(email_server, email_sender, email_rcp_list, file)
+		}
 	}
 }
 
-func SendMail(email_server, file string) {
-	//send email
-	msg := gomail.NewMessage()
-
-	msg.SetHeader("From", "jonas.riedel@4com.de")
-	msg.SetHeader("To", "jonas.riedel@vier.ai")
-	msg.SetHeader("Subject", "Brand Magazine")
-
-	body := fmt.Sprintf("Hier das brand eins Magazin %s", file)
-	msg.SetBody("text/html", body)
-	msg.Attach(file)
-
+func SendMail(email_server, email_sender, email_rcp_list, file string) {
 	mailer := gomail.NewDialer(email_server, 25, "", "")
 	mailer.TLSConfig = &tls.Config{InsecureSkipVerify: true}
 
-	if err := mailer.DialAndSend(msg); err != nil {
-		panic(err)
+	for _, e := range strings.Split(email_rcp_list, ",") {
+		log.Println("Sending email to " + e)
+		//send email
+		msg := gomail.NewMessage()
+
+		msg.SetHeader("From", email_sender)
+		msg.SetHeader("To", e)
+		msg.SetHeader("Subject", "Brand Magazine")
+
+		body := fmt.Sprintf("Hier das brand eins Magazin %s", file)
+		msg.SetBody("text/html", body)
+		msg.Attach(file)
+
+		if err := mailer.DialAndSend(msg); err != nil {
+			panic(err)
+		}
 	}
 
 }
